@@ -1,0 +1,22 @@
+{
+    "id": "samplerobot",
+    "name": "Sample Robot",
+    "version": "0.1.0",
+    "description": "Autosample external MIDI gear to create SFZ instruments",
+    "author": "Move Anything",
+    "dsp": "dsp.so",
+    "api_version": 2,
+    "component_type": "tool",
+    "tool_config": {
+        "interactive": true,
+        "command": null,
+        "skip_file_browser": true,
+        "allow_new_file": true
+    },
+    "capabilities": {
+        "audio_in": true,
+        "audio_out": true,
+        "midi_in": true,
+        "midi_out": true
+    }
+}

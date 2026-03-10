@@ -1,0 +1,18 @@
+{
+    "title": "Sample Robot",
+    "children": [
+        {
+            "title": "Overview",
+            "lines": [
+                "Autosample external",
+                "MIDI gear to create",
+                "SFZ instruments.",
+                "",
+                "Connect synth via",
+                "USB MIDI + line in.",
+                "Set audio input to",
+                "line-in first."
+            ]
+        }
+    ]
+}
