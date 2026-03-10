@@ -13,6 +13,49 @@
                 "Set audio input to",
                 "line-in first."
             ]
+        },
+        {
+            "title": "Setup",
+            "lines": [
+                "Low/Hi Note: range",
+                "Zones: # of keys",
+                "Layers: velocity lvls",
+                "Hold: note duration",
+                "Loop: find loop pts",
+                "MIDI Ch: output ch",
+                "",
+                "Jog: select param",
+                "Knob 1: adjust value",
+                "Rec: start sampling"
+            ]
+        },
+        {
+            "title": "Naming",
+            "lines": [
+                "Jog: scroll chars",
+                "Jog click: add char",
+                "Back: delete char",
+                "Rec: confirm & start",
+                "",
+                "Name will be the",
+                "instrument folder",
+                "in SFZ Player."
+            ]
+        },
+        {
+            "title": "Sampling",
+            "lines": [
+                "Fully automatic.",
+                "Progress shown on",
+                "screen.",
+                "",
+                "Hold Back to cancel.",
+                "Partial instruments",
+                "are kept.",
+                "",
+                "Output goes to SFZ",
+                "Player instruments."
+            ]
         }
     ]
 }
