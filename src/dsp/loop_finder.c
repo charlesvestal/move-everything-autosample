@@ -158,7 +158,7 @@ loop_result_t loop_find(const int16_t *stereo_samples,
     for (int w = 0; w < num_windows; w++)
         compute_magnitude(cfg, mono, w * HOP_SIZE, &mags[w * MAG_BINS]);
 
-    kiss_free(cfg);
+    kiss_fft_free(cfg);
 
     /* --- Find top candidates (most similar non-adjacent pairs) --- */
     candidate_t cands[MAX_CANDIDATES];
