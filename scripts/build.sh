@@ -15,8 +15,14 @@ ${CROSS_PREFIX}gcc -Ofast -shared -fPIC \
     -DNDEBUG \
     src/dsp/samplerobot_plugin.c \
     src/dsp/wav_writer.c \
+    src/dsp/silence_detect.c \
+    src/dsp/sfz_writer.c \
+    src/dsp/loop_finder.c \
+    src/dsp/third_party/kissfft/kiss_fft.c \
+    src/dsp/third_party/kissfft/kiss_fftr.c \
     -o build/dsp.so \
     -Isrc/dsp \
+    -Isrc/dsp/third_party/kissfft \
     -lm
 
 rm -rf "dist/$MODULE_ID"
