@@ -14,6 +14,7 @@ ${CROSS_PREFIX}gcc -Ofast -shared -fPIC \
     -fomit-frame-pointer -fno-stack-protector \
     -DNDEBUG \
     src/dsp/samplerobot_plugin.c \
+    src/dsp/wav_writer.c \
     -o build/dsp.so \
     -Isrc/dsp \
     -lm
