@@ -280,15 +280,11 @@ function startSampling() {
    GLOBAL HOOKS
    ══════════════════════════════════════════════ */
 
-globalThis.onModuleLoad = function() {
+globalThis.init = function() {
     debugLog("Sample Robot loaded");
 };
 
-globalThis.onDspReady = function() {
-    debugLog("DSP ready");
-};
-
-globalThis.onTick = function() {
+globalThis.tick = function() {
     clear_screen();
     switch (currentView) {
         case VIEW_SETUP:      drawSetup(); break;
@@ -308,7 +304,7 @@ globalThis.onTick = function() {
     }
 };
 
-globalThis.onMidi = function(data) {
+globalThis.onMidiMessageInternal = function(data) {
     if ((data[0] & 0xF0) !== 0xB0) return;  /* CC only */
     var cc = data[1];
     var value = data[2];
