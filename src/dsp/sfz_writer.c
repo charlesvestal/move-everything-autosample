@@ -50,11 +50,9 @@ int sfz_write(const char *path, const sfz_instrument_t *inst)
     fprintf(f, "// %s - %d zones, %d velocity layers\n\n",
             inst->instrument_name, N, M);
 
-    fprintf(f, "<control>\n");
-    fprintf(f, "default_path=samples/\n\n");
+    fprintf(f, "<control>\n\n");
 
-    fprintf(f, "<global>\n");
-    fprintf(f, "ampeg_release=0.5\n\n");
+    fprintf(f, "<global>\n\n");
 
     /* --- precompute velocity midpoints --- */
     int vel_mid[SFZ_MAX_LAYERS]; /* vel_mid[i] = midpoint between layer i and i+1 */
@@ -140,9 +138,20 @@ int sfz_write(const char *path, const sfz_instrument_t *inst)
                 fprintf(f, "loop_mode=loop_sustain\n");
                 fprintf(f, "loop_start=%d\n", smp->loop_start);
                 fprintf(f, "loop_end=%d\n", smp->loop_end);
-                fprintf(f, "loop_crossfade=%d\n", smp->loop_crossfade);
+                /* loop_crossfade is in seconds per SFZ spec */
+                float xfade_sec = (float)smp->loop_crossfade / 44100.0f;
+                if (xfade_sec < 0.005f) xfade_sec = 0.005f;
+                fprintf(f, "loop_crossfade=%g\n", xfade_sec);
+                /* Release = exact tail length after loop_end */
+                int tail_frames = smp->num_frames - smp->loop_end;
+                if (tail_frames < 4410) tail_frames = 4410; /* min 0.1s */
+                float release_sec = (float)tail_frames / 44100.0f;
+                fprintf(f, "ampeg_release=%g\n", release_sec);
             } else {
-                fprintf(f, "loop_mode=no_loop\n");
+                /* No loop: release = full sample length */
+                float release_sec = (float)smp->num_frames / 44100.0f;
+                if (release_sec < 0.1f) release_sec = 0.1f;
+                fprintf(f, "ampeg_release=%g\n", release_sec);
             }
 
             fprintf(f, "\n");

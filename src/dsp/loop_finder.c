@@ -12,9 +12,9 @@
 #define MIN_WINDOWS     4
 #define MIN_WINDOW_SEP  5       /* ~100ms at 1024-hop / 44100 */
 #define MAX_CANDIDATES  20
-#define ZC_SEARCH       132     /* ±3ms at 44100 */
-#define CORR_LEN        441     /* 10ms at 44100 */
-#define MIN_CORRELATION 0.9f
+#define ZC_SEARCH       441     /* ±10ms at 44100 */
+#define CORR_LEN        882     /* 20ms at 44100 */
+#define MIN_CORRELATION 0.85f
 
 typedef struct {
     int win_a;
@@ -230,12 +230,12 @@ loop_result_t loop_find(const int16_t *stereo_samples,
     float score = best.correlation * length_bonus;
     (void)score; /* single candidate set, score used implicitly */
 
-    /* --- Compute crossfade --- */
-    int crossfade = loop_length / 10;
-    if (crossfade < 220)
-        crossfade = 220;
-    if (crossfade > 2205)
-        crossfade = 2205;
+    /* --- Compute crossfade (in samples, converted to seconds by writer) --- */
+    int crossfade = loop_length / 8;
+    if (crossfade < 882)        /* min 20ms */
+        crossfade = 882;
+    if (crossfade > 4410)       /* max 100ms */
+        crossfade = 4410;
 
     /* --- Build result (translate back to original stereo frame indices) --- */
     result.found = 1;

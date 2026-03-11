@@ -10,6 +10,7 @@ typedef struct {
     int midi_note;          /* MIDI note that was sampled */
     int velocity;           /* velocity that was sampled */
     char filename[128];     /* relative path: samples/C2_v042.wav */
+    int num_frames;         /* total frames in WAV */
     int has_loop;           /* 0 or 1 */
     int loop_start;         /* sample frame */
     int loop_end;           /* sample frame */

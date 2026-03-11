@@ -120,6 +120,9 @@ typedef struct {
     /* Status for UI polling */
     char status_text[128];
 
+    /* Release tail silence tracking */
+    int silence_blocks;     /* consecutive silent blocks in RELEASE state */
+
     /* Pending MIDI for JS to send via move_midi_external_send */
     int midi_pending;       /* 0=none, 1=note_on, 2=note_off */
     int midi_note;
@@ -289,10 +292,12 @@ static void process_and_advance(samplerobot_instance_t *inst) {
     int onset = silence_find_onset(inst->capture_buf, inst->capture_frames,
                                    onset_thresh, 4410, 88);
 
-    /* Trim trailing silence */
-    float tail_thresh = inst->noise_floor_rms * 2.0f;   /* ~6dB above */
+    /* Trim trailing silence - be generous to preserve release tails.
+     * Use 1x noise floor (just above noise) with a short confirmation window.
+     * Keep 0.5s of padding after last audible content. */
+    float tail_thresh = inst->noise_floor_rms * 1.2f;
     int tail = silence_find_tail(inst->capture_buf, inst->capture_frames,
-                                 tail_thresh, 8820, 8820);
+                                 tail_thresh, 4410, 22050);
 
     /* Validate */
     if (onset < 0 || tail - onset < 4410) {
@@ -310,14 +315,27 @@ static void process_and_advance(samplerobot_instance_t *inst) {
         int16_t *trimmed = inst->capture_buf + onset * 2;
         int trimmed_len = tail - onset;
 
-        /* Loop detection */
+        /* Loop detection - search the full sustain region.
+         * Skip attack (200ms), search up to 90% of trimmed length
+         * to avoid searching in the release tail. */
         loop_result_t loop_res = {0};
         if (inst->loop_detect) {
-            int sustain_end = inst->hold_blocks * MOVE_FRAMES_PER_BLOCK - onset;
-            if (sustain_end > trimmed_len) sustain_end = trimmed_len;
             int skip_attack = 8820;  /* 200ms */
-            if (skip_attack < sustain_end) {
+            int sustain_end = trimmed_len * 9 / 10;  /* 90% of sample */
+            /* Clamp to note-off point if it's within the trimmed region */
+            int noteoff_frame = inst->hold_blocks * MOVE_FRAMES_PER_BLOCK - onset;
+            if (noteoff_frame > 0 && noteoff_frame < sustain_end)
+                sustain_end = noteoff_frame;
+            if (skip_attack < sustain_end && sustain_end > skip_attack + 4410) {
                 loop_res = loop_find(trimmed, trimmed_len, skip_attack, sustain_end);
+                if (g_host && g_host->log) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg),
+                             "SampleRobot: loop search skip=%d end=%d len=%d found=%d corr=%.3f",
+                             skip_attack, sustain_end, trimmed_len,
+                             loop_res.found, loop_res.quality);
+                    g_host->log(msg);
+                }
             }
         }
 
@@ -340,6 +358,7 @@ static void process_and_advance(samplerobot_instance_t *inst) {
         info->midi_note = note;
         info->velocity = vel;
         strncpy(info->filename, filename, sizeof(info->filename) - 1);
+        info->num_frames = trimmed_len;
         info->has_loop = loop_res.found;
         info->loop_start = loop_res.found ? loop_res.loop_start : 0;
         info->loop_end = loop_res.found ? loop_res.loop_end : 0;
@@ -757,6 +776,7 @@ static void sr_render_block(void *instance, int16_t *out, int frames) {
             send_note_off(inst);
             inst->state = STATE_RELEASE;
             inst->block_counter = 0;
+            inst->silence_blocks = 0;
             snprintf(inst->status_text, sizeof(inst->status_text), "Release...");
         }
         break;
@@ -765,21 +785,29 @@ static void sr_render_block(void *instance, int16_t *out, int frames) {
         append_audio(inst, audio_in, frames);
         inst->block_counter++;
         {
-            /* Check silence: RMS of last 200ms below threshold */
-            int window = 8820; /* 200ms */
-            float threshold = inst->noise_floor_rms * 2.0f; /* noise_floor + ~6dB */
-            int timeout_blocks = (int)(10.0f * MOVE_SAMPLE_RATE / MOVE_FRAMES_PER_BLOCK);
+            /* Use peak-based silence detection like SampleScanner:
+             * Check if the last chunk's peak is below threshold.
+             * Require ~2 seconds of consecutive silence before stopping.
+             * This preserves long release tails. */
+            float threshold = inst->noise_floor_rms * 1.5f;
+            int timeout_blocks = (int)(15.0f * MOVE_SAMPLE_RATE / MOVE_FRAMES_PER_BLOCK);
+            /* silence_blocks counts consecutive silent blocks */
+            int silence_needed = (int)(2.0f * MOVE_SAMPLE_RATE / MOVE_FRAMES_PER_BLOCK); /* 2 sec */
 
-            if (inst->capture_frames >= window) {
-                float tail_rms = silence_rms(
-                    inst->capture_buf + (inst->capture_frames - window) * 2,
-                    window);
-                if (tail_rms < threshold || inst->block_counter >= timeout_blocks) {
-                    inst->state = STATE_PROCESSING;
-                    snprintf(inst->status_text, sizeof(inst->status_text), "Processing...");
-                }
+            /* Check peak of current block */
+            int16_t block_peak = 0;
+            for (int i = 0; i < frames * 2; i++) {
+                int16_t s = audio_in[i] < 0 ? -audio_in[i] : audio_in[i];
+                if (s > block_peak) block_peak = s;
             }
-            if (inst->block_counter >= timeout_blocks) {
+
+            if ((float)block_peak < threshold) {
+                inst->silence_blocks++;
+            } else {
+                inst->silence_blocks = 0;
+            }
+
+            if (inst->silence_blocks >= silence_needed || inst->block_counter >= timeout_blocks) {
                 inst->state = STATE_PROCESSING;
                 snprintf(inst->status_text, sizeof(inst->status_text), "Processing...");
             }
