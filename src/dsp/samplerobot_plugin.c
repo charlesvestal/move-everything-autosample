@@ -1,5 +1,5 @@
 /*
- * Sample Robot DSP Plugin
+ * AutoSample DSP Plugin
  *
  * Autosamples external MIDI gear via USB MIDI out + line-in audio.
  * Produces SFZ instruments compatible with the SFZ Player module.
@@ -189,7 +189,7 @@ static void send_note_on(samplerobot_instance_t *inst) {
     inst->midi_ch = inst->midi_channel - 1;  /* 0-based */
     if (g_host && g_host->log) {
         char log_msg[128];
-        snprintf(log_msg, sizeof(log_msg), "SampleRobot: Note ON pending ch=%d note=%d vel=%d",
+        snprintf(log_msg, sizeof(log_msg), "AutoSample: Note ON pending ch=%d note=%d vel=%d",
                  inst->midi_channel, note, vel);
         g_host->log(log_msg);
     }
@@ -203,7 +203,7 @@ static void send_note_off(samplerobot_instance_t *inst) {
     inst->midi_ch = inst->midi_channel - 1;
     if (g_host && g_host->log) {
         char log_msg[128];
-        snprintf(log_msg, sizeof(log_msg), "SampleRobot: Note OFF pending ch=%d note=%d",
+        snprintf(log_msg, sizeof(log_msg), "AutoSample: Note OFF pending ch=%d note=%d",
                  inst->midi_channel, note);
         g_host->log(log_msg);
     }
@@ -281,7 +281,7 @@ static void process_and_advance(samplerobot_instance_t *inst) {
         float full_rms = silence_rms(inst->capture_buf, inst->capture_frames);
         char msg[256];
         snprintf(msg, sizeof(msg),
-                 "SampleRobot: process %s%d v%d - capture_frames=%d peak=%d full_rms=%.2f noise_rms=%.2f",
+                 "AutoSample: process %s%d v%d - capture_frames=%d peak=%d full_rms=%.2f noise_rms=%.2f",
                  NOTE_DISPLAY[note_idx], octave, vel,
                  inst->capture_frames, peak, full_rms, inst->noise_floor_rms);
         g_host->log(msg);
@@ -315,23 +315,19 @@ static void process_and_advance(samplerobot_instance_t *inst) {
         int16_t *trimmed = inst->capture_buf + onset * 2;
         int trimmed_len = tail - onset;
 
-        /* Loop detection - search the full sustain region.
-         * Skip attack (200ms), search up to 90% of trimmed length
-         * to avoid searching in the release tail. */
+        /* Loop detection - search the sustain region.
+         * Skip attack (200ms), search up to 90% of trimmed length.
+         * Don't clamp to note-off — sustained sounds continue through release. */
         loop_result_t loop_res = {0};
         if (inst->loop_detect) {
             int skip_attack = 8820;  /* 200ms */
             int sustain_end = trimmed_len * 9 / 10;  /* 90% of sample */
-            /* Clamp to note-off point if it's within the trimmed region */
-            int noteoff_frame = inst->hold_blocks * MOVE_FRAMES_PER_BLOCK - onset;
-            if (noteoff_frame > 0 && noteoff_frame < sustain_end)
-                sustain_end = noteoff_frame;
             if (skip_attack < sustain_end && sustain_end > skip_attack + 4410) {
                 loop_res = loop_find(trimmed, trimmed_len, skip_attack, sustain_end);
                 if (g_host && g_host->log) {
                     char msg[256];
                     snprintf(msg, sizeof(msg),
-                             "SampleRobot: loop search skip=%d end=%d len=%d found=%d corr=%.3f",
+                             "AutoSample: loop search skip=%d end=%d len=%d found=%d corr=%.3f",
                              skip_attack, sustain_end, trimmed_len,
                              loop_res.found, loop_res.quality);
                     g_host->log(msg);
@@ -421,7 +417,7 @@ static void finish_instrument(samplerobot_instance_t *inst) {
 
     char log_msg[256];
     snprintf(log_msg, sizeof(log_msg),
-             "Sample Robot: finished '%s' - %d samples, %d loops, %d skipped",
+             "AutoSample: finished '%s' - %d samples, %d loops, %d skipped",
              inst->instrument_name, inst->completed_samples,
              inst->loops_found, inst->skipped_samples);
     if (g_host->log) g_host->log(log_msg);
@@ -452,14 +448,14 @@ static void* sr_create_instance(const char *module_dir, const char *json_default
     inst->capture_buf = calloc(MAX_CAPTURE_FRAMES * 2, sizeof(int16_t));
     if (!inst->capture_buf) {
         if (g_host && g_host->log)
-            g_host->log("SampleRobot: FAILED to allocate capture buffer!");
+            g_host->log("AutoSample: FAILED to allocate capture buffer!");
         free(inst);
         return NULL;
     }
 
     if (g_host && g_host->log) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "SampleRobot: created instance, capture buf %d MB",
+        snprintf(msg, sizeof(msg), "AutoSample: created instance, capture buf %d MB",
                  (int)((MAX_CAPTURE_FRAMES * 2 * sizeof(int16_t)) / (1024*1024)));
         g_host->log(msg);
     }
@@ -543,7 +539,7 @@ static void parse_config_json(samplerobot_instance_t *inst, const char *json) {
     if (g_host && g_host->log) {
         char msg[256];
         snprintf(msg, sizeof(msg),
-                 "SampleRobot: parsed config - name='%s' range=%d-%d zones=%d layers=%d hold=%.1f loop=%d ch=%d",
+                 "AutoSample: parsed config - name='%s' range=%d-%d zones=%d layers=%d hold=%.1f loop=%d ch=%d",
                  inst->instrument_name, inst->range_low, inst->range_high,
                  inst->key_zones, inst->velocity_layers, inst->hold_duration,
                  inst->loop_detect, inst->midi_channel);
@@ -557,7 +553,7 @@ static void sr_set_param(void *instance, const char *key, const char *val) {
 
     if (g_host && g_host->log) {
         char msg[512];
-        snprintf(msg, sizeof(msg), "SampleRobot: set_param key='%s' val='%.200s'", key, val);
+        snprintf(msg, sizeof(msg), "AutoSample: set_param key='%s' val='%.200s'", key, val);
         g_host->log(msg);
     }
 
@@ -569,7 +565,7 @@ static void sr_set_param(void *instance, const char *key, const char *val) {
             if (inst->state == STATE_IDLE || inst->state == STATE_DONE) {
                 if (g_host && g_host->log) {
                     char msg[256];
-                    snprintf(msg, sizeof(msg), "SampleRobot: START (from config_json) name='%s' zones=%d layers=%d",
+                    snprintf(msg, sizeof(msg), "AutoSample: START (from config_json) name='%s' zones=%d layers=%d",
                              inst->instrument_name, inst->key_zones, inst->velocity_layers);
                     g_host->log(msg);
                 }
@@ -605,7 +601,7 @@ static void sr_set_param(void *instance, const char *key, const char *val) {
         if (inst->state == STATE_IDLE || inst->state == STATE_DONE) {
             if (g_host && g_host->log) {
                 char msg[256];
-                snprintf(msg, sizeof(msg), "SampleRobot: START - state=%d name='%s' zones=%d layers=%d",
+                snprintf(msg, sizeof(msg), "AutoSample: START - state=%d name='%s' zones=%d layers=%d",
                          inst->state, inst->instrument_name, inst->key_zones, inst->velocity_layers);
                 g_host->log(msg);
             }
@@ -613,7 +609,7 @@ static void sr_set_param(void *instance, const char *key, const char *val) {
             start_sampling(inst);
             if (g_host && g_host->log) {
                 char msg[256];
-                snprintf(msg, sizeof(msg), "SampleRobot: schedule computed, total=%d, state=%d",
+                snprintf(msg, sizeof(msg), "AutoSample: schedule computed, total=%d, state=%d",
                          inst->total_samples, inst->state);
                 g_host->log(msg);
             }
@@ -723,7 +719,7 @@ static void sr_render_block(void *instance, int16_t *out, int frames) {
     static int render_log_count = 0;
     if (inst->state != STATE_IDLE && inst->state != STATE_DONE && render_log_count < 5) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "SampleRobot: render_block state=%d block=%d capture=%d",
+        snprintf(msg, sizeof(msg), "AutoSample: render_block state=%d block=%d capture=%d",
                  inst->state, inst->block_counter, inst->capture_frames);
         if (g_host && g_host->log) g_host->log(msg);
         render_log_count++;
@@ -748,7 +744,7 @@ static void sr_render_block(void *instance, int16_t *out, int frames) {
             if (g_host && g_host->log) {
                 char msg[256];
                 snprintf(msg, sizeof(msg),
-                         "SampleRobot: audio_in check - src=%s peak=%d first4=[%d,%d,%d,%d]",
+                         "AutoSample: audio_in check - src=%s peak=%d first4=[%d,%d,%d,%d]",
                          "mapped_mem",
                          peak, audio_in[0], audio_in[1], audio_in[2], audio_in[3]);
                 g_host->log(msg);
@@ -758,7 +754,7 @@ static void sr_render_block(void *instance, int16_t *out, int frames) {
             inst->noise_floor_rms = silence_rms(inst->capture_buf, inst->capture_frames);
             if (g_host && g_host->log) {
                 char msg[128];
-                snprintf(msg, sizeof(msg), "SampleRobot: noise_floor_rms=%.2f", inst->noise_floor_rms);
+                snprintf(msg, sizeof(msg), "AutoSample: noise_floor_rms=%.2f", inst->noise_floor_rms);
                 g_host->log(msg);
             }
             inst->capture_frames = 0;
@@ -785,14 +781,16 @@ static void sr_render_block(void *instance, int16_t *out, int frames) {
         append_audio(inst, audio_in, frames);
         inst->block_counter++;
         {
-            /* Use peak-based silence detection like SampleScanner:
-             * Check if the last chunk's peak is below threshold.
-             * Require ~2 seconds of consecutive silence before stopping.
-             * This preserves long release tails. */
-            float threshold = inst->noise_floor_rms * 1.5f;
-            int timeout_blocks = (int)(15.0f * MOVE_SAMPLE_RATE / MOVE_FRAMES_PER_BLOCK);
-            /* silence_blocks counts consecutive silent blocks */
-            int silence_needed = (int)(2.0f * MOVE_SAMPLE_RATE / MOVE_FRAMES_PER_BLOCK); /* 2 sec */
+            /* Peak-based silence detection:
+             * Use a moderate threshold to detect when the release has ended.
+             * If noise floor is very low (e.g. digital synth), use an
+             * absolute minimum threshold so we don't wait forever on
+             * near-zero signals. 0.5s silence confirms note ended.
+             * 5s hard timeout prevents getting stuck. */
+            float threshold = inst->noise_floor_rms * 3.0f;
+            if (threshold < 50.0f) threshold = 50.0f;  /* absolute minimum */
+            int timeout_blocks = (int)(5.0f * MOVE_SAMPLE_RATE / MOVE_FRAMES_PER_BLOCK);
+            int silence_needed = (int)(0.5f * MOVE_SAMPLE_RATE / MOVE_FRAMES_PER_BLOCK);
 
             /* Check peak of current block */
             int16_t block_peak = 0;

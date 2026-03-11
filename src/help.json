@@ -1,5 +1,5 @@
 {
-    "title": "Sample Robot",
+    "title": "AutoSample",
     "children": [
         {
             "title": "Overview",
@@ -24,37 +24,51 @@
                 "Loop: find loop pts",
                 "MIDI Ch: output ch",
                 "",
-                "Jog: select param",
-                "Knob 1: adjust value",
-                "Rec: start sampling"
+                "Jog: navigate menu",
+                "Click: edit / confirm",
+                "Back: exit module"
             ]
         },
         {
-            "title": "Naming",
+            "title": "Starting",
             "lines": [
-                "Jog: scroll chars",
-                "Jog click: add char",
-                "Back: delete char",
-                "Rec: confirm & start",
+                "Select Name & Sample",
+                "or press Rec.",
                 "",
-                "Name will be the",
-                "instrument folder",
-                "in SFZ Player."
+                "Type instrument name",
+                "using on-screen keys.",
+                "Jog: scroll chars",
+                "Click: add character",
+                "Back: delete char",
+                "Rec: confirm & start"
             ]
         },
         {
             "title": "Sampling",
             "lines": [
                 "Fully automatic.",
+                "Sends MIDI notes,",
+                "records audio in.",
+                "",
                 "Progress shown on",
-                "screen.",
+                "screen and announced",
+                "for each sample.",
                 "",
                 "Hold Back to cancel.",
                 "Partial instruments",
-                "are kept.",
+                "are kept."
+            ]
+        },
+        {
+            "title": "Output",
+            "lines": [
+                "Creates SFZ files",
+                "with loop points",
+                "and velocity layers.",
                 "",
-                "Output goes to SFZ",
-                "Player instruments."
+                "Instruments appear",
+                "in SFZ Player",
+                "automatically."
             ]
         }
     ]

@@ -1,123 +1,129 @@
 import {
-    MidiCC,
-    MoveShift, MoveMainKnob, MoveMainButton, MoveBack,
-    MoveCapture, MoveRec,
-    MoveKnob1, MoveKnob2, MoveKnob3, MoveKnob4,
-    MoveLeft, MoveRight,
-    White, Black, DarkGrey, LightGrey
+    MoveShift, MoveRec, MoveBack, MoveMainButton,
+    White, Black, LightGrey
 } from '/data/UserData/move-anything/shared/constants.mjs';
 
-import { decodeDelta } from '/data/UserData/move-anything/shared/input_filter.mjs';
+import { decodeDelta, isCapacitiveTouchMessage } from '/data/UserData/move-anything/shared/input_filter.mjs';
 import { announce } from '/data/UserData/move-anything/shared/screen_reader.mjs';
 import { log as uniLog } from '/data/UserData/move-anything/shared/logger.mjs';
 
-function debugLog(msg) { uniLog("SampleRobot", msg); }
+/* Shared menu system */
+import { createValue, createToggle, createAction, formatItemValue } from '/data/UserData/move-anything/shared/menu_items.mjs';
+import { createMenuState, handleMenuInput } from '/data/UserData/move-anything/shared/menu_nav.mjs';
+import { createMenuStack } from '/data/UserData/move-anything/shared/menu_stack.mjs';
+import { drawHierarchicalMenu } from '/data/UserData/move-anything/shared/menu_render.mjs';
+
+/* Shared text entry */
+import {
+    openTextEntry, isTextEntryActive, handleTextEntryMidi,
+    drawTextEntry, tickTextEntry
+} from '/data/UserData/move-anything/shared/text_entry.mjs';
+
+function debugLog(msg) { uniLog("AutoSample", msg); }
 
 /* ── Views ── */
 var VIEW_SETUP      = 0;
-var VIEW_NAMING     = 1;
-var VIEW_SAMPLING   = 2;
-var VIEW_PROCESSING = 3;
-var VIEW_DONE       = 4;
+var VIEW_SAMPLING   = 1;
+var VIEW_PROCESSING = 2;
+var VIEW_DONE       = 3;
 
 var currentView = VIEW_SETUP;
 var shiftHeld = false;
+var cancelled = false;
+var lastAnnouncedProgress = '';
+var doneAnnounced = false;
 
-/* ── Setup params ── */
+/* ── Setup params (mutable state) ── */
 var NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 
 function noteNameFmt(n) {
     return NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 2);
 }
 
-function onOffFmt(v) { return v ? 'ON' : 'OFF'; }
+var config = {
+    range_low: 36,
+    range_high: 84,
+    key_zones: 2,
+    velocity_layers: 2,
+    hold_duration: 3.0,
+    loop_detect: true,
+    midi_channel: 1
+};
 
-var params = [
-    { key: 'range_low',       label: 'Low Note',  val: 36,  min: 0,   max: 127, step: 1,   fmt: noteNameFmt },
-    { key: 'range_high',      label: 'Hi Note',   val: 84,  min: 0,   max: 127, step: 1,   fmt: noteNameFmt },
-    { key: 'key_zones',       label: 'Zones',     val: 2,   min: 1,   max: 24,  step: 1,   fmt: null },
-    { key: 'velocity_layers', label: 'Layers',    val: 2,   min: 1,   max: 8,   step: 1,   fmt: null },
-    { key: 'hold_duration',   label: 'Hold (s)',  val: 3.0, min: 0.5, max: 30,  step: 0.5, fmt: function(v) { return v.toFixed(1); } },
-    { key: 'loop_detect',     label: 'Loop',      val: 1,   min: 0,   max: 1,   step: 1,   fmt: onOffFmt },
-    { key: 'midi_channel',    label: 'MIDI Ch',   val: 1,   min: 1,   max: 16,  step: 1,   fmt: null },
-];
-var selectedParam = 0;
-
-/* ── Naming state ── */
 var instrumentName = '';
-var charIndex = 0;
-var CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -_';
+
+/* ── Menu system ── */
+var menuState = createMenuState();
+var menuStack = createMenuStack();
+
+function buildSetupMenu() {
+    return [
+        createValue('Low Note', {
+            get: function() { return config.range_low; },
+            set: function(v) { config.range_low = v; },
+            min: 0, max: 127, step: 1,
+            format: noteNameFmt
+        }),
+        createValue('Hi Note', {
+            get: function() { return config.range_high; },
+            set: function(v) { config.range_high = v; },
+            min: 0, max: 127, step: 1,
+            format: noteNameFmt
+        }),
+        createValue('Zones', {
+            get: function() { return config.key_zones; },
+            set: function(v) { config.key_zones = v; },
+            min: 1, max: 24, step: 1
+        }),
+        createValue('Layers', {
+            get: function() { return config.velocity_layers; },
+            set: function(v) { config.velocity_layers = v; },
+            min: 1, max: 8, step: 1
+        }),
+        createValue('Hold (s)', {
+            get: function() { return config.hold_duration; },
+            set: function(v) { config.hold_duration = Math.round(v * 2) / 2; },
+            min: 0.5, max: 30, step: 0.5,
+            format: function(v) { return v.toFixed(1); }
+        }),
+        createToggle('Loop Detect', {
+            get: function() { return config.loop_detect; },
+            set: function(v) { config.loop_detect = v; }
+        }),
+        createValue('MIDI Ch', {
+            get: function() { return config.midi_channel; },
+            set: function(v) { config.midi_channel = v; },
+            min: 1, max: 16, step: 1
+        }),
+        createAction('Name & Sample', function() {
+            openTextEntry({
+                title: 'Instrument Name',
+                initialText: instrumentName,
+                onConfirm: function(text) {
+                    instrumentName = text;
+                    if (instrumentName.length > 0) {
+                        startSampling();
+                    }
+                },
+                onCancel: function() {
+                    announce("Cancelled");
+                }
+            });
+        })
+    ];
+}
 
 /* ── Back-hold tracking for cancel ── */
 var backHeldSince = 0;
 
-/* ── Helper: clamp ── */
-function clamp(v, lo, hi) {
-    if (v < lo) return lo;
-    if (v > hi) return hi;
-    return v;
-}
-
-/* ── Helper: format param value ── */
-function fmtVal(p) {
-    if (p.fmt) return p.fmt(p.val);
-    return String(p.val);
-}
-
 /* ── Helper: total sample count ── */
 function totalSamples() {
-    var zones = params[2].val;   /* key_zones */
-    var layers = params[3].val;  /* velocity_layers */
-    return zones * layers;
+    return config.key_zones * config.velocity_layers;
 }
 
 /* ══════════════════════════════════════════════
-   DRAW FUNCTIONS
+   DRAW FUNCTIONS (sampling/processing/done only)
    ══════════════════════════════════════════════ */
-
-function drawSetup() {
-    print(4, 0, "SAMPLE ROBOT", White);
-
-    /* Visible rows for params: y 10..54, 8px each = ~5 rows */
-    var visibleRows = 5;
-    var scrollTop = 0;
-    if (selectedParam >= visibleRows) {
-        scrollTop = selectedParam - visibleRows + 1;
-    }
-
-    for (var i = 0; i < visibleRows && (i + scrollTop) < params.length; i++) {
-        var pi = i + scrollTop;
-        var p = params[pi];
-        var y = 10 + i * 9;
-        if (pi === selectedParam) {
-            fill_rect(0, y, 128, 9, White);
-            print(2, y + 1, p.label, Black);
-            print(76, y + 1, fmtVal(p), Black);
-        } else {
-            print(2, y + 1, p.label, White);
-            print(76, y + 1, fmtVal(p), LightGrey);
-        }
-    }
-
-    print(2, 56, "Total:" + totalSamples(), LightGrey);
-    print(72, 56, "[Rec]Start", LightGrey);
-}
-
-function drawNaming() {
-    print(4, 0, "NAME INSTRUMENT", White);
-
-    /* Current name with cursor */
-    var display = instrumentName + '_';
-    print(4, 14, display, White);
-
-    /* Current char selection */
-    var ch = CHARS.charAt(charIndex);
-    if (ch === ' ') ch = 'SPC';
-    print(4, 28, "Char: " + ch, LightGrey);
-
-    print(4, 40, "[Jog]scroll [Click]add", LightGrey);
-    print(4, 50, "[Rec]start [Back]del", LightGrey);
-}
 
 function drawSampling() {
     var progress = host_module_get_param('progress') || '0/0';
@@ -128,7 +134,6 @@ function drawSampling() {
     print(4, 0, "SAMPLING:", White);
     print(4, 9, instrumentName, LightGrey);
 
-    /* Parse progress "N/M" */
     var parts = progress.split('/');
     var done = parseInt(parts[0]) || 0;
     var total = parseInt(parts[1]) || 1;
@@ -139,16 +144,24 @@ function drawSampling() {
     if (filled > 0) fill_rect(4, 22, filled, 8, White);
     print(108, 22, progress, LightGrey);
 
-    print(4, 34, "Note:" + noteName + " Vel:" + velocity, White);
+    print(4, 34, "Note: " + noteName + "  Vel: " + velocity, White);
     print(4, 44, status, LightGrey);
     print(4, 56, "[Hold Back to cancel]", LightGrey);
 
-    /* Auto-transition */
+    /* Announce each new sample */
+    if (progress !== lastAnnouncedProgress) {
+        lastAnnouncedProgress = progress;
+        announce(noteName + " velocity " + velocity + ", " + progress);
+    }
+
+    /* Auto-transition (only fires once since currentView changes) */
     var state = host_module_get_param('state') || '';
-    if (state === 'processing') {
+    if (state === 'processing' && currentView === VIEW_SAMPLING) {
         currentView = VIEW_PROCESSING;
-    } else if (state === 'done') {
+        announce("Processing");
+    } else if (state === 'done' && currentView === VIEW_SAMPLING) {
         currentView = VIEW_DONE;
+        announce("Complete");
     }
 }
 
@@ -173,8 +186,9 @@ function drawProcessing() {
     print(4, 44, status, LightGrey);
 
     var state = host_module_get_param('state') || '';
-    if (state === 'done') {
+    if (state === 'done' && currentView === VIEW_PROCESSING) {
         currentView = VIEW_DONE;
+        announce("Complete");
     }
 }
 
@@ -183,99 +197,55 @@ function drawDone() {
     var zones      = host_module_get_param('zones_used') || '0';
     var loops      = host_module_get_param('loops_found') || '0';
     var skipped    = host_module_get_param('skipped') || '0';
+    var wasCancelled = cancelled;
 
-    print(4, 0, "COMPLETE!", White);
-    print(4, 12, instrumentName, White);
-    print(4, 24, completed + " samples, " + zones + " zones", LightGrey);
-    print(4, 33, loops + " loops found", LightGrey);
-    print(4, 42, skipped + " skipped", LightGrey);
-
-    print(4, 54, "Ready in SFZ Player", White);
-}
-
-/* ══════════════════════════════════════════════
-   MIDI HANDLERS
-   ══════════════════════════════════════════════ */
-
-function handleSetupMidi(cc, value) {
-    if (cc === MoveMainKnob) {
-        var delta = decodeDelta(value);
-        selectedParam = clamp(selectedParam + delta, 0, params.length - 1);
-    } else if (cc === MoveKnob1) {
-        var delta = decodeDelta(value);
-        var p = params[selectedParam];
-        p.val = clamp(p.val + delta * p.step, p.min, p.max);
-        /* Round to step precision for floats */
-        p.val = Math.round(p.val / p.step) * p.step;
-    } else if (cc === MoveRec && value > 0) {
-        currentView = VIEW_NAMING;
-        announce("Name instrument");
-    }
-}
-
-function handleNamingMidi(cc, value) {
-    if (cc === MoveMainKnob) {
-        var delta = decodeDelta(value);
-        charIndex = charIndex + delta;
-        if (charIndex < 0) charIndex = CHARS.length - 1;
-        if (charIndex >= CHARS.length) charIndex = 0;
-    } else if (cc === MoveMainButton && value > 0) {
-        instrumentName += CHARS.charAt(charIndex);
-    } else if (cc === MoveBack && value > 0) {
-        if (instrumentName.length > 0) {
-            instrumentName = instrumentName.substring(0, instrumentName.length - 1);
+    if (wasCancelled) {
+        print(4, 0, "CANCELLED", White);
+        print(4, 12, instrumentName, LightGrey);
+        if (parseInt(completed) > 0) {
+            print(4, 28, completed + " samples captured", LightGrey);
         } else {
-            currentView = VIEW_SETUP;
-            announce("Setup");
+            print(4, 28, "No samples saved", LightGrey);
         }
-    } else if (cc === MoveRec && value > 0) {
-        startSampling();
-    }
-}
-
-function handleSamplingMidi(cc, value) {
-    if (cc === MoveBack) {
-        if (value > 0) {
-            backHeldSince = Date.now();
-        } else {
-            backHeldSince = 0;
+        print(4, 54, "[Press any button]", LightGrey);
+        if (!doneAnnounced) {
+            doneAnnounced = true;
+            announce("Cancelled. " + (parseInt(completed) > 0 ? completed + " samples captured" : "No samples saved"));
         }
-        if (backHeldSince > 0 && (Date.now() - backHeldSince) > 1000) {
-            host_module_set_param('stop', '1');
-            backHeldSince = 0;
-            currentView = VIEW_DONE;
+    } else {
+        print(4, 0, "COMPLETE!", White);
+        print(4, 12, instrumentName, White);
+        print(4, 24, completed + " samples, " + zones + " zones", LightGrey);
+        print(4, 33, loops + " loops found", LightGrey);
+        print(4, 42, skipped + " skipped", LightGrey);
+        print(4, 54, "Ready in SFZ Player", White);
+        if (!doneAnnounced) {
+            doneAnnounced = true;
+            announce("Complete. " + completed + " samples, " + loops + " loops. Ready in SFZ Player");
         }
-    }
-}
-
-function handleProcessingMidi(cc, value) {
-    /* Processing is automatic, no user controls needed */
-}
-
-function handleDoneMidi(cc, value) {
-    if (value > 0) {
-        /* Any button press resets to setup */
-        instrumentName = '';
-        charIndex = 0;
-        currentView = VIEW_SETUP;
-        announce("Setup");
     }
 }
 
 /* ── Start sampling ── */
 function startSampling() {
     if (instrumentName.length === 0) return;
-    /* Bundle all config into a single JSON param to avoid shim dropping rapid calls */
-    var config = {};
-    for (var i = 0; i < params.length; i++) {
-        config[params[i].key] = params[i].val;
-    }
-    config['instrument_name'] = instrumentName;
-    var json = JSON.stringify(config);
-    config['start'] = 1;
-    var jsonWithStart = JSON.stringify(config);
-    debugLog("startSampling config: " + jsonWithStart);
-    host_module_set_param('config_json', jsonWithStart);
+    cancelled = false;
+    doneAnnounced = false;
+    lastAnnouncedProgress = '';
+    var cfg = {
+        range_low: config.range_low,
+        range_high: config.range_high,
+        key_zones: config.key_zones,
+        velocity_layers: config.velocity_layers,
+        hold_duration: config.hold_duration,
+        loop_detect: config.loop_detect ? 1 : 0,
+        midi_channel: config.midi_channel,
+        instrument_name: instrumentName,
+        start: 1
+    };
+    var json = JSON.stringify(cfg);
+    debugLog("startSampling config: " + json);
+    host_module_set_param('config_json', json);
     currentView = VIEW_SAMPLING;
     backHeldSince = 0;
     announce("Sampling started");
@@ -287,20 +257,36 @@ function startSampling() {
    ══════════════════════════════════════════════ */
 
 globalThis.init = function() {
-    debugLog("Sample Robot loaded");
+    debugLog("AutoSample loaded");
+    menuStack.push({
+        title: 'AUTOSAMPLE',
+        items: buildSetupMenu()
+    });
 };
 
 globalThis.tick = function() {
     clear_screen();
-    switch (currentView) {
-        case VIEW_SETUP:      drawSetup(); break;
-        case VIEW_NAMING:     drawNaming(); break;
-        case VIEW_SAMPLING:   drawSampling(); break;
-        case VIEW_PROCESSING: drawProcessing(); break;
-        case VIEW_DONE:       drawDone(); break;
+
+    if (isTextEntryActive()) {
+        tickTextEntry();
+        drawTextEntry();
+    } else {
+        switch (currentView) {
+            case VIEW_SETUP:
+                drawHierarchicalMenu({
+                    title: 'AUTOSAMPLE',
+                    items: menuStack.current() ? menuStack.current().items : buildSetupMenu(),
+                    state: menuState,
+                    footer: { left: 'Total: ' + totalSamples(), right: 'Rec: start' }
+                });
+                break;
+            case VIEW_SAMPLING:   drawSampling(); break;
+            case VIEW_PROCESSING: drawProcessing(); break;
+            case VIEW_DONE:       drawDone(); break;
+        }
     }
 
-    /* Poll DSP for pending MIDI and send via JS API (works for USB MIDI out) */
+    /* Poll DSP for pending MIDI and send via JS API */
     if (currentView === VIEW_SAMPLING || currentView === VIEW_PROCESSING) {
         var pending = host_module_get_param('midi_pending');
         if (pending) {
@@ -310,11 +296,9 @@ globalThis.tick = function() {
             var vel  = parseInt(parts[2]);
             var ch   = parseInt(parts[3]) || 0;
             if (type === 1) {
-                /* Note On: CIN=0x29 for 3-byte, status=0x90|ch */
                 move_midi_external_send([0x29, 0x90 | ch, note, vel]);
                 debugLog("MIDI ON ch=" + ch + " n=" + note + " v=" + vel);
             } else if (type === 2) {
-                /* Note Off: CIN=0x28 for 3-byte, status=0x80|ch */
                 move_midi_external_send([0x28, 0x80 | ch, note, 0]);
                 debugLog("MIDI OFF ch=" + ch + " n=" + note);
             }
@@ -325,27 +309,84 @@ globalThis.tick = function() {
     if (currentView === VIEW_SAMPLING && backHeldSince > 0) {
         if ((Date.now() - backHeldSince) > 1000) {
             host_module_set_param('stop', '1');
+            cancelled = true;
             backHeldSince = 0;
             currentView = VIEW_DONE;
+            announce("Cancelled");
         }
     }
 };
 
 globalThis.onMidiMessageInternal = function(data) {
-    if ((data[0] & 0xF0) !== 0xB0) return;  /* CC only */
+    if (isCapacitiveTouchMessage(data)) return;
+
+    var status = data[0] & 0xF0;
     var cc = data[1];
     var value = data[2];
 
-    if (cc === MoveShift) {
+    /* Track shift */
+    if (status === 0xB0 && cc === MoveShift) {
         shiftHeld = value > 0;
         return;
     }
 
+    /* Text entry gets priority */
+    if (isTextEntryActive()) {
+        handleTextEntryMidi(data);
+        return;
+    }
+
+    /* Only handle CC from here */
+    if (status !== 0xB0) return;
+
     switch (currentView) {
-        case VIEW_SETUP:      handleSetupMidi(cc, value); break;
-        case VIEW_NAMING:     handleNamingMidi(cc, value); break;
-        case VIEW_SAMPLING:   handleSamplingMidi(cc, value); break;
-        case VIEW_PROCESSING: handleProcessingMidi(cc, value); break;
-        case VIEW_DONE:       handleDoneMidi(cc, value); break;
+        case VIEW_SETUP: {
+            /* Rec button as shortcut to start */
+            if (cc === MoveRec && value > 0) {
+                openTextEntry({
+                    title: 'Instrument Name',
+                    initialText: instrumentName,
+                    onConfirm: function(text) {
+                        instrumentName = text;
+                        if (instrumentName.length > 0) {
+                            startSampling();
+                        }
+                    },
+                    onCancel: function() {
+                        announce("Cancelled");
+                    }
+                });
+                return;
+            }
+            var items = menuStack.current() ? menuStack.current().items : buildSetupMenu();
+            handleMenuInput({
+                cc: cc,
+                value: value,
+                items: items,
+                state: menuState,
+                stack: menuStack,
+                shiftHeld: shiftHeld,
+                onBack: function() { host_module_exit(); }
+            });
+            break;
+        }
+        case VIEW_SAMPLING:
+            if (cc === MoveBack) {
+                if (value > 0) {
+                    backHeldSince = Date.now();
+                } else {
+                    backHeldSince = 0;
+                }
+            }
+            break;
+        case VIEW_PROCESSING:
+            break;
+        case VIEW_DONE:
+            if (value > 0 && (cc === MoveBack || cc === MoveMainButton || cc === MoveRec)) {
+                instrumentName = '';
+                currentView = VIEW_SETUP;
+                announce("Setup");
+            }
+            break;
     }
 };

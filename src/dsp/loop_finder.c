@@ -14,7 +14,7 @@
 #define MAX_CANDIDATES  20
 #define ZC_SEARCH       441     /* ±10ms at 44100 */
 #define CORR_LEN        882     /* 20ms at 44100 */
-#define MIN_CORRELATION 0.85f
+#define MIN_CORRELATION 0.75f
 
 typedef struct {
     int win_a;
@@ -213,6 +213,26 @@ loop_result_t loop_find(const int16_t *stereo_samples,
                     best.start = s;
                     best.end = e;
                 }
+            }
+        }
+    }
+
+    /* --- Fallback: if zero-crossing refinement found nothing,
+     *     try the top candidates without zero-crossing alignment.
+     *     The crossfade will smooth over any discontinuity. --- */
+    if (best.correlation < MIN_CORRELATION) {
+        for (int c = 0; c < cand_count; c++) {
+            int s = cands[c].win_a * HOP_SIZE + FFT_SIZE / 2;
+            int e = cands[c].win_b * HOP_SIZE + FFT_SIZE / 2;
+            if (s < 0 || s + CORR_LEN >= sustain_length) continue;
+            if (e < 0 || e + CORR_LEN >= sustain_length) continue;
+            if (e <= s) continue;
+
+            float corr = normalized_cross_correlation(mono, s, e, CORR_LEN);
+            if (corr > best.correlation) {
+                best.correlation = corr;
+                best.start = s;
+                best.end = e;
             }
         }
     }

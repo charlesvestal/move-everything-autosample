@@ -7,7 +7,7 @@ IMAGE_NAME="move-anything-samplerobot-builder"
 
 # Check if we need Docker
 if [ -z "$CROSS_PREFIX" ] && [ ! -f "/.dockerenv" ]; then
-    echo "=== Building Sample Robot Module (via Docker) ==="
+    echo "=== Building AutoSample Module (via Docker) ==="
     if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
         echo "Building Docker image (first time only)..."
         docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$REPO_ROOT"
@@ -24,7 +24,7 @@ fi
 CROSS_PREFIX="${CROSS_PREFIX:-aarch64-linux-gnu-}"
 
 cd "$REPO_ROOT"
-echo "=== Building Sample Robot Module ==="
+echo "=== Building AutoSample Module ==="
 
 mkdir -p build
 ${CROSS_PREFIX}gcc -Ofast -shared -fPIC \

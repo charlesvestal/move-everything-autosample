@@ -1,6 +1,6 @@
 {
     "id": "samplerobot",
-    "name": "Sample Robot",
+    "name": "AutoSample",
     "version": "0.1.0",
     "description": "Autosample external MIDI gear to create SFZ instruments",
     "author": "Move Anything",
