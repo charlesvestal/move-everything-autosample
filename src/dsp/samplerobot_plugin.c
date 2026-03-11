@@ -24,6 +24,9 @@
 #define MOVE_SAMPLE_RATE 44100
 #define MOVE_FRAMES_PER_BLOCK 128
 
+typedef void (*move_mod_emit_value_fn)(void *ctx, int source_id, float value);
+typedef void (*move_mod_clear_source_fn)(void *ctx, int source_id);
+
 typedef struct host_api_v1 {
     uint32_t api_version;
     int sample_rate;
@@ -34,6 +37,10 @@ typedef struct host_api_v1 {
     void (*log)(const char *msg);
     int (*midi_send_internal)(const uint8_t *msg, int len);
     int (*midi_send_external)(const uint8_t *msg, int len);
+    int (*get_clock_status)(void);
+    move_mod_emit_value_fn mod_emit_value;
+    move_mod_clear_source_fn mod_clear_source;
+    void *mod_host_ctx;
 } host_api_v1_t;
 
 typedef struct plugin_api_v2 {
@@ -112,6 +119,12 @@ typedef struct {
 
     /* Status for UI polling */
     char status_text[128];
+
+    /* Pending MIDI for JS to send via move_midi_external_send */
+    int midi_pending;       /* 0=none, 1=note_on, 2=note_off */
+    int midi_note;
+    int midi_vel;
+    int midi_ch;            /* 0-15 */
 } samplerobot_instance_t;
 
 /* ---- Helper: mkdir_p ---- */
@@ -167,14 +180,30 @@ static void compute_schedule(samplerobot_instance_t *inst) {
 static void send_note_on(samplerobot_instance_t *inst) {
     int note = inst->sample_notes[inst->current_zone];
     int vel = inst->sample_velocities[inst->current_layer];
-    uint8_t msg[3] = { (uint8_t)(0x90 | (inst->midi_channel - 1)), (uint8_t)note, (uint8_t)vel };
-    g_host->midi_send_external(msg, 3);
+    inst->midi_pending = 1;  /* note on */
+    inst->midi_note = note;
+    inst->midi_vel = vel;
+    inst->midi_ch = inst->midi_channel - 1;  /* 0-based */
+    if (g_host && g_host->log) {
+        char log_msg[128];
+        snprintf(log_msg, sizeof(log_msg), "SampleRobot: Note ON pending ch=%d note=%d vel=%d",
+                 inst->midi_channel, note, vel);
+        g_host->log(log_msg);
+    }
 }
 
 static void send_note_off(samplerobot_instance_t *inst) {
     int note = inst->sample_notes[inst->current_zone];
-    uint8_t msg[3] = { (uint8_t)(0x80 | (inst->midi_channel - 1)), (uint8_t)note, 0 };
-    g_host->midi_send_external(msg, 3);
+    inst->midi_pending = 2;  /* note off */
+    inst->midi_note = note;
+    inst->midi_vel = 0;
+    inst->midi_ch = inst->midi_channel - 1;
+    if (g_host && g_host->log) {
+        char log_msg[128];
+        snprintf(log_msg, sizeof(log_msg), "SampleRobot: Note OFF pending ch=%d note=%d",
+                 inst->midi_channel, note);
+        g_host->log(log_msg);
+    }
 }
 
 /* ---- Audio capture ---- */
@@ -239,6 +268,22 @@ static void process_and_advance(samplerobot_instance_t *inst) {
     int octave = (note / 12) - 1;
     int note_idx = note % 12;
 
+    /* Log peak and RMS of entire capture for diagnostics */
+    if (g_host && g_host->log) {
+        int16_t peak = 0;
+        for (int i = 0; i < inst->capture_frames * 2; i++) {
+            int16_t s = inst->capture_buf[i] < 0 ? -inst->capture_buf[i] : inst->capture_buf[i];
+            if (s > peak) peak = s;
+        }
+        float full_rms = silence_rms(inst->capture_buf, inst->capture_frames);
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "SampleRobot: process %s%d v%d - capture_frames=%d peak=%d full_rms=%.2f noise_rms=%.2f",
+                 NOTE_DISPLAY[note_idx], octave, vel,
+                 inst->capture_frames, peak, full_rms, inst->noise_floor_rms);
+        g_host->log(msg);
+    }
+
     /* Trim leading silence */
     float onset_thresh = inst->noise_floor_rms * 4.0f;  /* ~12dB above */
     int onset = silence_find_onset(inst->capture_buf, inst->capture_frames,
@@ -255,8 +300,10 @@ static void process_and_advance(samplerobot_instance_t *inst) {
         inst->skipped_samples++;
         char log_msg[256];
         snprintf(log_msg, sizeof(log_msg),
-                 "Skipped %s%d v%d (no signal or too short)",
-                 NOTE_DISPLAY[note_idx], octave, vel);
+                 "Skipped %s%d v%d (onset=%d tail=%d frames=%d noise_rms=%.2f thresh=%.2f)",
+                 NOTE_DISPLAY[note_idx], octave, vel,
+                 onset, tail, inst->capture_frames,
+                 inst->noise_floor_rms, onset_thresh);
         if (g_host->log) g_host->log(log_msg);
     } else {
         /* Trimmed buffer */
@@ -370,8 +417,8 @@ static void* sr_create_instance(const char *module_dir, const char *json_default
     /* Defaults */
     inst->range_low = 36;
     inst->range_high = 84;
-    inst->key_zones = 8;
-    inst->velocity_layers = 3;
+    inst->key_zones = 2;
+    inst->velocity_layers = 2;
     inst->hold_duration = 3.0f;
     inst->loop_detect = 1;
     inst->midi_channel = 1;
@@ -385,8 +432,17 @@ static void* sr_create_instance(const char *module_dir, const char *json_default
     /* Allocate capture buffer (stereo interleaved) */
     inst->capture_buf = calloc(MAX_CAPTURE_FRAMES * 2, sizeof(int16_t));
     if (!inst->capture_buf) {
+        if (g_host && g_host->log)
+            g_host->log("SampleRobot: FAILED to allocate capture buffer!");
         free(inst);
         return NULL;
+    }
+
+    if (g_host && g_host->log) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "SampleRobot: created instance, capture buf %d MB",
+                 (int)((MAX_CAPTURE_FRAMES * 2 * sizeof(int16_t)) / (1024*1024)));
+        g_host->log(msg);
     }
 
     inst->state = STATE_IDLE;
@@ -407,11 +463,103 @@ static void sr_on_midi(void *instance, const uint8_t *msg, int len, int source) 
     (void)instance; (void)msg; (void)len; (void)source;
 }
 
+/* Simple JSON value extractor: finds "key": value or "key": "string" */
+static int json_get_string(const char *json, const char *key, char *out, int out_len) {
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return 0;
+    p += strlen(pattern);
+    while (*p == ' ') p++;
+    if (*p == '"') {
+        p++;
+        int i = 0;
+        while (*p && *p != '"' && i < out_len - 1) {
+            out[i++] = *p++;
+        }
+        out[i] = '\0';
+        return 1;
+    } else {
+        /* Number */
+        int i = 0;
+        while (*p && *p != ',' && *p != '}' && i < out_len - 1) {
+            out[i++] = *p++;
+        }
+        out[i] = '\0';
+        return 1;
+    }
+}
+
+static void parse_config_json(samplerobot_instance_t *inst, const char *json) {
+    char buf[128];
+
+    if (json_get_string(json, "range_low", buf, sizeof(buf)))
+        inst->range_low = atoi(buf);
+    if (json_get_string(json, "range_high", buf, sizeof(buf)))
+        inst->range_high = atoi(buf);
+    if (json_get_string(json, "key_zones", buf, sizeof(buf))) {
+        inst->key_zones = atoi(buf);
+        if (inst->key_zones < 1) inst->key_zones = 1;
+        if (inst->key_zones > SFZ_MAX_ZONES) inst->key_zones = SFZ_MAX_ZONES;
+    }
+    if (json_get_string(json, "velocity_layers", buf, sizeof(buf))) {
+        inst->velocity_layers = atoi(buf);
+        if (inst->velocity_layers < 1) inst->velocity_layers = 1;
+        if (inst->velocity_layers > SFZ_MAX_LAYERS) inst->velocity_layers = SFZ_MAX_LAYERS;
+    }
+    if (json_get_string(json, "hold_duration", buf, sizeof(buf)))
+        inst->hold_duration = (float)atof(buf);
+    if (json_get_string(json, "loop_detect", buf, sizeof(buf)))
+        inst->loop_detect = atoi(buf);
+    if (json_get_string(json, "midi_channel", buf, sizeof(buf))) {
+        inst->midi_channel = atoi(buf);
+        if (inst->midi_channel < 1) inst->midi_channel = 1;
+        if (inst->midi_channel > 16) inst->midi_channel = 16;
+    }
+    if (json_get_string(json, "instrument_name", buf, sizeof(buf))) {
+        strncpy(inst->instrument_name, buf, sizeof(inst->instrument_name) - 1);
+        inst->instrument_name[sizeof(inst->instrument_name) - 1] = '\0';
+    }
+
+    if (g_host && g_host->log) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "SampleRobot: parsed config - name='%s' range=%d-%d zones=%d layers=%d hold=%.1f loop=%d ch=%d",
+                 inst->instrument_name, inst->range_low, inst->range_high,
+                 inst->key_zones, inst->velocity_layers, inst->hold_duration,
+                 inst->loop_detect, inst->midi_channel);
+        g_host->log(msg);
+    }
+}
+
 static void sr_set_param(void *instance, const char *key, const char *val) {
     samplerobot_instance_t *inst = instance;
     if (!inst || !key || !val) return;
 
-    if (strcmp(key, "range_low") == 0) {
+    if (g_host && g_host->log) {
+        char msg[512];
+        snprintf(msg, sizeof(msg), "SampleRobot: set_param key='%s' val='%.200s'", key, val);
+        g_host->log(msg);
+    }
+
+    if (strcmp(key, "config_json") == 0) {
+        parse_config_json(inst, val);
+        /* Check if start was included in the JSON */
+        char buf[16];
+        if (json_get_string(val, "start", buf, sizeof(buf)) && atoi(buf)) {
+            if (inst->state == STATE_IDLE || inst->state == STATE_DONE) {
+                if (g_host && g_host->log) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "SampleRobot: START (from config_json) name='%s' zones=%d layers=%d",
+                             inst->instrument_name, inst->key_zones, inst->velocity_layers);
+                    g_host->log(msg);
+                }
+                compute_schedule(inst);
+                start_sampling(inst);
+            }
+        }
+        return;
+    } else if (strcmp(key, "range_low") == 0) {
         inst->range_low = atoi(val);
     } else if (strcmp(key, "range_high") == 0) {
         inst->range_high = atoi(val);
@@ -436,8 +584,20 @@ static void sr_set_param(void *instance, const char *key, const char *val) {
         inst->instrument_name[sizeof(inst->instrument_name) - 1] = '\0';
     } else if (strcmp(key, "start") == 0) {
         if (inst->state == STATE_IDLE || inst->state == STATE_DONE) {
+            if (g_host && g_host->log) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "SampleRobot: START - state=%d name='%s' zones=%d layers=%d",
+                         inst->state, inst->instrument_name, inst->key_zones, inst->velocity_layers);
+                g_host->log(msg);
+            }
             compute_schedule(inst);
             start_sampling(inst);
+            if (g_host && g_host->log) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "SampleRobot: schedule computed, total=%d, state=%d",
+                         inst->total_samples, inst->state);
+                g_host->log(msg);
+            }
         }
     } else if (strcmp(key, "stop") == 0) {
         if (inst->state != STATE_IDLE && inst->state != STATE_DONE) {
@@ -514,6 +674,13 @@ static int sr_get_param(void *instance, const char *key, char *buf, int buf_len)
         snprintf(buf, buf_len, "%d", inst->midi_channel);
     } else if (strcmp(key, "instrument_name") == 0) {
         snprintf(buf, buf_len, "%s", inst->instrument_name);
+    } else if (strcmp(key, "midi_pending") == 0) {
+        /* Format: "type,note,vel,ch" where type=0(none),1(on),2(off) */
+        snprintf(buf, buf_len, "%d,%d,%d,%d",
+                 inst->midi_pending, inst->midi_note,
+                 inst->midi_vel, inst->midi_ch);
+        /* Auto-clear after read */
+        inst->midi_pending = 0;
     } else {
         return 0;
     }
@@ -527,10 +694,21 @@ static int sr_get_error(void *instance, char *buf, int buf_len) {
 
 static void sr_render_block(void *instance, int16_t *out, int frames) {
     samplerobot_instance_t *inst = instance;
+    /* Shim copies hardware audio_in before render_block, so this is real input */
     int16_t *audio_in = (int16_t *)(g_host->mapped_memory + g_host->audio_in_offset);
 
     /* Always passthrough for monitoring */
     memcpy(out, audio_in, frames * 2 * sizeof(int16_t));
+
+    /* Log first few render calls to confirm it's running */
+    static int render_log_count = 0;
+    if (inst->state != STATE_IDLE && inst->state != STATE_DONE && render_log_count < 5) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "SampleRobot: render_block state=%d block=%d capture=%d",
+                 inst->state, inst->block_counter, inst->capture_frames);
+        if (g_host && g_host->log) g_host->log(msg);
+        render_log_count++;
+    }
 
     switch (inst->state) {
     case STATE_IDLE:
@@ -541,8 +719,29 @@ static void sr_render_block(void *instance, int16_t *out, int frames) {
         /* Capture ~100ms for noise floor */
         append_audio(inst, audio_in, frames);
         inst->block_counter++;
+        /* Log audio levels on first block of first sample */
+        if (inst->block_counter == 1 && inst->current_zone == 0 && inst->current_layer == 0) {
+            int16_t peak = 0;
+            for (int i = 0; i < frames * 2; i++) {
+                int16_t s = audio_in[i] < 0 ? -audio_in[i] : audio_in[i];
+                if (s > peak) peak = s;
+            }
+            if (g_host && g_host->log) {
+                char msg[256];
+                snprintf(msg, sizeof(msg),
+                         "SampleRobot: audio_in check - src=%s peak=%d first4=[%d,%d,%d,%d]",
+                         "mapped_mem",
+                         peak, audio_in[0], audio_in[1], audio_in[2], audio_in[3]);
+                g_host->log(msg);
+            }
+        }
         if (inst->block_counter >= 35) {  /* ~100ms at 128 frames/block */
             inst->noise_floor_rms = silence_rms(inst->capture_buf, inst->capture_frames);
+            if (g_host && g_host->log) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "SampleRobot: noise_floor_rms=%.2f", inst->noise_floor_rms);
+                g_host->log(msg);
+            }
             inst->capture_frames = 0;
             send_note_on(inst);
             inst->state = STATE_RECORDING;

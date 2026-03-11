@@ -35,8 +35,8 @@ function onOffFmt(v) { return v ? 'ON' : 'OFF'; }
 var params = [
     { key: 'range_low',       label: 'Low Note',  val: 36,  min: 0,   max: 127, step: 1,   fmt: noteNameFmt },
     { key: 'range_high',      label: 'Hi Note',   val: 84,  min: 0,   max: 127, step: 1,   fmt: noteNameFmt },
-    { key: 'key_zones',       label: 'Zones',     val: 8,   min: 1,   max: 24,  step: 1,   fmt: null },
-    { key: 'velocity_layers', label: 'Layers',    val: 3,   min: 1,   max: 8,   step: 1,   fmt: null },
+    { key: 'key_zones',       label: 'Zones',     val: 2,   min: 1,   max: 24,  step: 1,   fmt: null },
+    { key: 'velocity_layers', label: 'Layers',    val: 2,   min: 1,   max: 8,   step: 1,   fmt: null },
     { key: 'hold_duration',   label: 'Hold (s)',  val: 3.0, min: 0.5, max: 30,  step: 0.5, fmt: function(v) { return v.toFixed(1); } },
     { key: 'loop_detect',     label: 'Loop',      val: 1,   min: 0,   max: 1,   step: 1,   fmt: onOffFmt },
     { key: 'midi_channel',    label: 'MIDI Ch',   val: 1,   min: 1,   max: 16,  step: 1,   fmt: null },
@@ -265,11 +265,17 @@ function handleDoneMidi(cc, value) {
 /* ── Start sampling ── */
 function startSampling() {
     if (instrumentName.length === 0) return;
+    /* Bundle all config into a single JSON param to avoid shim dropping rapid calls */
+    var config = {};
     for (var i = 0; i < params.length; i++) {
-        host_module_set_param(params[i].key, String(params[i].val));
+        config[params[i].key] = params[i].val;
     }
-    host_module_set_param('instrument_name', instrumentName);
-    host_module_set_param('start', '1');
+    config['instrument_name'] = instrumentName;
+    var json = JSON.stringify(config);
+    config['start'] = 1;
+    var jsonWithStart = JSON.stringify(config);
+    debugLog("startSampling config: " + jsonWithStart);
+    host_module_set_param('config_json', jsonWithStart);
     currentView = VIEW_SAMPLING;
     backHeldSince = 0;
     announce("Sampling started");
@@ -292,6 +298,27 @@ globalThis.tick = function() {
         case VIEW_SAMPLING:   drawSampling(); break;
         case VIEW_PROCESSING: drawProcessing(); break;
         case VIEW_DONE:       drawDone(); break;
+    }
+
+    /* Poll DSP for pending MIDI and send via JS API (works for USB MIDI out) */
+    if (currentView === VIEW_SAMPLING || currentView === VIEW_PROCESSING) {
+        var pending = host_module_get_param('midi_pending');
+        if (pending) {
+            var parts = pending.split(',');
+            var type = parseInt(parts[0]);
+            var note = parseInt(parts[1]);
+            var vel  = parseInt(parts[2]);
+            var ch   = parseInt(parts[3]) || 0;
+            if (type === 1) {
+                /* Note On: CIN=0x29 for 3-byte, status=0x90|ch */
+                move_midi_external_send([0x29, 0x90 | ch, note, vel]);
+                debugLog("MIDI ON ch=" + ch + " n=" + note + " v=" + vel);
+            } else if (type === 2) {
+                /* Note Off: CIN=0x28 for 3-byte, status=0x80|ch */
+                move_midi_external_send([0x28, 0x80 | ch, note, 0]);
+                debugLog("MIDI OFF ch=" + ch + " n=" + note);
+            }
+        }
     }
 
     /* Check back-hold during sampling for cancel */
