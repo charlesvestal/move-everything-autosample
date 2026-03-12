@@ -1,6 +1,6 @@
 # AutoSample Module
 
-Autosample external MIDI gear to create SFZ instruments for [Move Everything](https://github.com/charlesvestal/move-anything).
+Autosample external MIDI gear to create SFZ instruments for [Move Everything](https://github.com/charlesvestal/move-everything).
 
 Connect a synthesizer via USB MIDI and line-in audio, configure the sampling range, and AutoSample records every note and velocity layer automatically — producing a playable SFZ instrument with loop points.
 
@@ -18,7 +18,7 @@ Connect a synthesizer via USB MIDI and line-in audio, configure the sampling ran
 
 ## Prerequisites
 
-- [Move Everything](https://github.com/charlesvestal/move-anything) installed on your Ableton Move
+- [Move Everything](https://github.com/charlesvestal/move-everything) installed on your Ableton Move
 - SSH access enabled: http://move.local/development/ssh
 - External synth connected via USB MIDI out and line-in audio
 - Audio input set to line-in
