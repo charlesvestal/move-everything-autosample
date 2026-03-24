@@ -231,7 +231,7 @@ static void finish_instrument(samplerobot_instance_t *inst);
 static void start_sampling(samplerobot_instance_t *inst) {
     /* Build output paths */
     snprintf(inst->output_dir, sizeof(inst->output_dir),
-             "/data/UserData/move-anything/modules/sound_generators/sfz/instruments/%s/",
+             "/data/UserData/schwung/modules/sound_generators/sfz/instruments/%s/",
              inst->instrument_name);
     snprintf(inst->samples_dir, sizeof(inst->samples_dir),
              "%ssamples/", inst->output_dir);

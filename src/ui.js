@@ -1,23 +1,23 @@
 import {
     MoveShift, MoveRec, MoveBack, MoveMainButton,
     White, Black, LightGrey
-} from '/data/UserData/move-anything/shared/constants.mjs';
+} from '/data/UserData/schwung/shared/constants.mjs';
 
-import { decodeDelta, isCapacitiveTouchMessage } from '/data/UserData/move-anything/shared/input_filter.mjs';
-import { announce } from '/data/UserData/move-anything/shared/screen_reader.mjs';
-import { log as uniLog } from '/data/UserData/move-anything/shared/logger.mjs';
+import { decodeDelta, isCapacitiveTouchMessage } from '/data/UserData/schwung/shared/input_filter.mjs';
+import { announce } from '/data/UserData/schwung/shared/screen_reader.mjs';
+import { log as uniLog } from '/data/UserData/schwung/shared/logger.mjs';
 
 /* Shared menu system */
-import { createValue, createToggle, createAction, formatItemValue } from '/data/UserData/move-anything/shared/menu_items.mjs';
-import { createMenuState, handleMenuInput } from '/data/UserData/move-anything/shared/menu_nav.mjs';
-import { createMenuStack } from '/data/UserData/move-anything/shared/menu_stack.mjs';
-import { drawHierarchicalMenu } from '/data/UserData/move-anything/shared/menu_render.mjs';
+import { createValue, createToggle, createAction, formatItemValue } from '/data/UserData/schwung/shared/menu_items.mjs';
+import { createMenuState, handleMenuInput } from '/data/UserData/schwung/shared/menu_nav.mjs';
+import { createMenuStack } from '/data/UserData/schwung/shared/menu_stack.mjs';
+import { drawHierarchicalMenu } from '/data/UserData/schwung/shared/menu_render.mjs';
 
 /* Shared text entry */
 import {
     openTextEntry, isTextEntryActive, handleTextEntryMidi,
     drawTextEntry, tickTextEntry
-} from '/data/UserData/move-anything/shared/text_entry.mjs';
+} from '/data/UserData/schwung/shared/text_entry.mjs';
 
 function debugLog(msg) { uniLog("AutoSample", msg); }
 
