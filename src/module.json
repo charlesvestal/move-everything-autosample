@@ -1,7 +1,7 @@
 {
     "id": "samplerobot",
     "name": "AutoSample",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Autosample external MIDI gear to create SFZ instruments",
     "author": "Move Anything",
     "dsp": "dsp.so",

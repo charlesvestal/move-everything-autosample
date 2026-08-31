@@ -1,75 +1,84 @@
 {
-    "title": "AutoSample",
-    "children": [
-        {
-            "title": "Overview",
-            "lines": [
-                "Autosample external",
-                "MIDI gear to create",
-                "SFZ instruments.",
-                "",
-                "Connect synth via",
-                "USB MIDI + line in.",
-                "Set audio input to",
-                "line-in first."
-            ]
-        },
-        {
-            "title": "Setup",
-            "lines": [
-                "Low/Hi Note: range",
-                "Zones: # of keys",
-                "Layers: velocity lvls",
-                "Hold: note duration",
-                "Loop: find loop pts",
-                "MIDI Ch: output ch",
-                "",
-                "Jog: navigate menu",
-                "Click: edit / confirm",
-                "Back: exit module"
-            ]
-        },
-        {
-            "title": "Starting",
-            "lines": [
-                "Select Name & Sample",
-                "or press Rec.",
-                "",
-                "Type instrument name",
-                "using on-screen keys.",
-                "Jog: scroll chars",
-                "Click: add character",
-                "Back: delete char",
-                "Rec: confirm & start"
-            ]
-        },
-        {
-            "title": "Sampling",
-            "lines": [
-                "Fully automatic.",
-                "Sends MIDI notes,",
-                "records audio in.",
-                "",
-                "Progress shown on",
-                "screen and announced",
-                "for each sample.",
-                "",
-                "Hold Back to cancel.",
-                "Partial instruments",
-                "are kept."
-            ]
-        },
-        {
-            "title": "Output",
-            "lines": [
-                "Creates SFZ files",
-                "with loop points",
-                "and velocity layers.",
-                "",
-                "Instruments appear",
-                "in SFZ Player",
-                "automatically."
-            ]
-        }
-    ]
+  "title": "AutoSample",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "Autosample external",
+        "MIDI gear to create",
+        "SFZ instruments.",
+        "",
+        "Connect synth via",
+        "USB MIDI + line in.",
+        "Set audio input to",
+        "line-in first."
+      ]
+    },
+    {
+      "title": "Setup",
+      "lines": [
+        "Low/Hi Note: range",
+        "Zones: # of keys",
+        "Layers: velocity lvls",
+        "Hold: note duration",
+        "Loop: find loop pts",
+        "MIDI Ch: output ch",
+        "",
+        "Jog: navigate menu",
+        "Click: edit / confirm",
+        "Back: exit module"
+      ]
+    },
+    {
+      "title": "Starting",
+      "lines": [
+        "Select Name & Sample",
+        "or press Rec.",
+        "",
+        "Type instrument name",
+        "using on-screen keys.",
+        "Jog: scroll chars",
+        "Click: add character",
+        "",
+        "Scroll past the",
+        "letters for the four",
+        "special keys:",
+        " ... page of chars",
+        " ___ space",
+        " x   delete char",
+        " OK  confirm & start",
+        "",
+        "Back cancels the",
+        "whole name entry."
+      ]
+    },
+    {
+      "title": "Sampling",
+      "lines": [
+        "Fully automatic.",
+        "Sends MIDI notes,",
+        "records audio in.",
+        "",
+        "Progress shown on",
+        "screen and announced",
+        "for each sample.",
+        "",
+        "Hold Back to cancel.",
+        "Partial instruments",
+        "are kept."
+      ]
+    },
+    {
+      "title": "Output",
+      "lines": [
+        "Creates SFZ files",
+        "with loop points",
+        "and velocity layers.",
+        "",
+        "Instruments appear",
+        "in SFZ Player",
+        "automatically."
+      ]
+    }
+  ]
 }
